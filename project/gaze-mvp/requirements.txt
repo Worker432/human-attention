@@ -1,0 +1,5 @@
+numpy>=2.2,<3
+opencv-python-headless>=4.11,<5
+PySide6>=6.8,<7
+pyobjc-framework-Vision>=11,<13
+pyobjc-framework-Quartz>=11,<13
