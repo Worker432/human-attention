@@ -1,0 +1,51 @@
+# macOS and editors
+.DS_Store
+._*
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Python environments, caches, and build output
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+.ipynb_checkpoints/
+.cache/
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Personal gaze recordings, progress, and exports
+sessions/
+collected/
+*.sqlite3
+*.sqlite3-*
+*.db
+*.db-*
+*.log
+
+# Downloaded datasets: keep only the extraction source
+/dataset/**
+!/dataset/PittImageVideoAdsDataset/
+!/dataset/PittImageVideoAdsDataset/extract_images.py
+
+# Generated research results, archives, and unpacked document checks
+/docs/attention_results_*/
+/docs/check_docx/
+*.zip
+~$*.docx
