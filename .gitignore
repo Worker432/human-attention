@@ -9,6 +9,9 @@
 
 # Python environments, caches, and build output
 .venv/
+.venv-*/
+models/
+*.pt
 venv/
 __pycache__/
 *.py[cod]

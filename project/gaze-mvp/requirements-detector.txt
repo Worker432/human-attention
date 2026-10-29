@@ -1,0 +1,4 @@
+# Separate environment: .venv-detector (do not install over the Beam environment).
+ultralytics==8.4.190
+torch==2.14.1
+torchvision==0.29.1
