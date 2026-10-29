@@ -12,6 +12,7 @@ from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QApplication
 from collection_store import CollectionStore
 from review_app import ReviewPanel, RecordingReader
+from gaze_analysis import ANALYSIS_VERSION, analysis_path, atomic_json, source_digest
 
 
 class ReviewTests(unittest.TestCase):
@@ -106,6 +107,35 @@ class ReviewTests(unittest.TestCase):
                 self.assertFalse(panel.play_button.isEnabled())
                 self.assertFalse(database.exists())
                 self.assertEqual(panel.list.count(), 0)
+            finally:
+                panel.close()
+
+    def test_object_overlay_and_fixation_table_use_matching_source(self):
+        with tempfile.TemporaryDirectory() as folder:
+            database, images = self.recording(folder)
+            reader = RecordingReader(database)
+            trial, samples, protocol = reader.load(reader.trials()[0]["id"])
+            fixation = dict(id=1, segment_id=0, start=.1, end=.2, duration=.1,
+                x=100., y=200., sample_count=3, object_id=1, class_id=39,
+                class_name="bottle", assignment="assigned", candidate_ids=[1])
+            atomic_json(analysis_path(database, trial["id"]), dict(
+                analysis_version=ANALYSIS_VERSION, source_digest=source_digest(trial, samples),
+                image_sha256=trial["image_sha256"], objects=[dict(object_id=1,
+                    class_id=39, class_name="bottle", confidence=.8, xyxy=[50, 100, 150, 300])],
+                fixations=[fixation], transitions=[]))
+            panel = ReviewPanel(database)
+            try:
+                self.assertEqual(len(panel.canvas.analysis["objects"]), 1)
+                self.assertEqual(panel.fixation_table.rowCount(), 1)
+                self.assertIn("bottle", panel.fixation_table.item(0, 3).text())
+                panel.select_fixation(0, 0)
+                self.assertEqual(panel.slider.value(), 200)
+                panel.box_toggle.setChecked(False)
+                self.assertFalse(panel.canvas.show_boxes)
+                panel.box_toggle.setChecked(True)
+                panel.show()
+                self.qt.processEvents()
+                panel.canvas.grab()
             finally:
                 panel.close()
 

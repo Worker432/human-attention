@@ -8,11 +8,13 @@ import sqlite3
 import sys
 import time
 
-from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
+from PySide6.QtCore import QPointF, QProcess, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPolygonF
-from PySide6.QtWidgets import (QApplication, QDialog, QFileDialog, QHBoxLayout,
+from PySide6.QtWidgets import (QApplication, QCheckBox, QDialog, QFileDialog, QHBoxLayout,
                               QLabel, QListWidget, QListWidgetItem, QPushButton,
-                              QSlider, QSplitter, QVBoxLayout, QWidget)
+                              QSlider, QSplitter, QTableWidget, QTableWidgetItem,
+                              QHeaderView, QVBoxLayout, QWidget)
+from gaze_analysis import load_analysis
 
 BASE = Path(__file__).resolve().parent
 STATUSES = {
@@ -68,6 +70,8 @@ class GazeCanvas(QWidget):
         self.image = QImage()
         self.samples = []
         self.position = 0.
+        self.analysis = None
+        self.show_boxes = True
         self.empty_message = "Выберите сохранённый просмотр слева"
         self.setMinimumSize(280, 240)
 
@@ -96,6 +100,32 @@ class GazeCanvas(QWidget):
             return QPointF(rect.x() + row["image_x"] * scale, rect.y() + row["image_y"] * scale)
 
         painter.setClipRect(rect)
+        if self.analysis and self.show_boxes:
+            labels = []
+            for box in self.analysis["objects"]:
+                x1, y1, x2, y2 = box["xyxy"]
+                bounds = QRectF(rect.x()+x1*scale, rect.y()+y1*scale, (x2-x1)*scale, (y2-y1)*scale)
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.setPen(QPen(QColor("#ffb56b"), 1.5))
+                painter.drawRect(bounds)
+                text = f"#{box['object_id']} {box['class_name']} {box['confidence']:.0%}"
+                metrics = painter.fontMetrics()
+                tw = min(metrics.horizontalAdvance(text) + 10, rect.width())
+                tx = min(max(rect.x(), bounds.x()), rect.right()-tw)
+                ty = max(rect.y(), bounds.y()-metrics.height()-4)
+                label = QRectF(tx, ty, tw, metrics.height()+4)
+                # Keep labels readable when neighbouring objects share a top edge.
+                for offset in range(len(self.analysis["objects"]) + 1):
+                    candidate_y = min(rect.bottom()-label.height(), ty + offset*(label.height()+2))
+                    candidate = QRectF(tx, candidate_y, tw, label.height())
+                    if not any(candidate.adjusted(-2, -1, 2, 1).intersects(other[0]) for other in labels):
+                        label = candidate
+                        break
+                labels.append((label, metrics.elidedText(text, Qt.TextElideMode.ElideRight, int(tw-6))))
+            for label, text in labels:
+                painter.fillRect(label, QColor("#26201b"))
+                painter.setPen(QColor("#ffcf98"))
+                painter.drawText(label.adjusted(4, 0, -2, 0), Qt.AlignmentFlag.AlignVCenter, text)
         painter.setPen(QPen(QColor("#55dcff"), 2))
         painter.setBrush(QColor("#55dcff"))
         previous, first, last = None, None, None
@@ -128,6 +158,9 @@ class ReviewPanel(QDialog):
         self.trial = None
         self.playing = False
         self.duration = 0.
+        self.analysis = None
+        self.worker = None
+        self.worker_output = ""
         self.setWindowTitle("Записи взгляда")
         self.resize(1180, 820)
         self.setStyleSheet('''QDialog {background:#20242b; color:#edf0f5;}
@@ -141,6 +174,9 @@ class ReviewPanel(QDialog):
         title = QLabel("Сохранённые просмотры")
         top.addWidget(title)
         top.addStretch()
+        self.analyze_button = QPushButton("Обработать новые · YOLO")
+        self.analyze_button.clicked.connect(self.start_analysis)
+        top.addWidget(self.analyze_button)
         self.refresh_button = QPushButton("Обновить список")
         self.refresh_button.clicked.connect(self.refresh)
         top.addWidget(self.refresh_button)
@@ -178,6 +214,30 @@ class ReviewPanel(QDialog):
         self.time_label = QLabel("0,00 / 0,00 с")
         playback.addWidget(self.time_label)
         content.addLayout(playback)
+        options = QHBoxLayout()
+        self.box_toggle = QCheckBox("Рамки объектов и классы")
+        self.box_toggle.setChecked(True)
+        self.box_toggle.setStyleSheet("color:#edf0f5;")
+        self.box_toggle.toggled.connect(self.toggle_boxes)
+        options.addWidget(self.box_toggle)
+        self.analysis_label = QLabel("Объекты ещё не обработаны")
+        self.analysis_label.setWordWrap(True)
+        options.addWidget(self.analysis_label, 1)
+        content.addLayout(options)
+        self.fixation_table = QTableWidget(0, 5)
+        self.fixation_table.setHorizontalHeaderLabels(["Фиксация", "Начало, с", "Длительность, с", "Объект", "Сопоставление"])
+        self.fixation_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        self.fixation_table.horizontalHeader().setStretchLastSection(True)
+        self.fixation_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.fixation_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.fixation_table.setMaximumHeight(160)
+        self.fixation_table.setStyleSheet("QTableWidget {background:#171b21; color:#edf0f5;} QHeaderView::section {background:#364456; color:white; padding:4px;}")
+        self.fixation_table.cellClicked.connect(self.select_fixation)
+        content.addWidget(self.fixation_table)
+        self.progress_label = QLabel("")
+        self.progress_label.setWordWrap(True)
+        self.progress_label.setTextFormat(Qt.TextFormat.PlainText)
+        content.addWidget(self.progress_label)
         self.notice = QLabel("Исходные точки Beam без сглаживания. Доля уверенных точек не измеряет точность калибровки.")
         self.notice.setWordWrap(True)
         self.notice.setTextFormat(Qt.TextFormat.PlainText)
@@ -218,6 +278,7 @@ class ReviewPanel(QDialog):
         else:
             self.trial = None
             self.canvas.set_recording(QImage(), [], 0.)
+            self.show_analysis(None)
             self.set_controls(False)
 
     def set_controls(self, enabled):
@@ -254,6 +315,7 @@ class ReviewPanel(QDialog):
             self.duration = max(recorded_end, last_sample, .001)
             self.canvas.empty_message = warning or "Изображение недоступно"
             self.canvas.set_recording(image, samples, self.duration)
+            self.show_analysis(load_analysis(self.reader.database, trial, samples) if not image.isNull() else None)
             total = len(samples)
             valid = sum(bool(s["valid"]) for s in samples)
             inside = sum(bool(drawable(s)) for s in samples)
@@ -271,7 +333,87 @@ class ReviewPanel(QDialog):
             self.trial = None
             self.summary.setText(f"Не удалось открыть просмотр: {exc}")
             self.canvas.set_recording(QImage(), [], 0.)
+            self.show_analysis(None)
             self.set_controls(False)
+
+    def toggle_boxes(self, enabled):
+        self.canvas.show_boxes = enabled
+        self.canvas.update()
+
+    def show_analysis(self, result):
+        self.analysis = self.canvas.analysis = result
+        self.fixation_table.setRowCount(0)
+        if result is None:
+            self.analysis_label.setText("Нажмите «Обработать новые · YOLO»")
+            self.canvas.update()
+            return
+        objects = len(result["objects"])
+        fixations = result["fixations"]
+        assigned = sum(f["assignment"] == "assigned" for f in fixations)
+        outside = sum(f["assignment"] == "outside" for f in fixations)
+        ambiguous = len(fixations) - assigned - outside
+        self.analysis_label.setText(f"Объектов: {objects} · Фиксаций: {len(fixations)} · В объектах: {assigned} · Вне: {outside} · Спорно: {ambiguous} · Переходов: {len(result['transitions'])}")
+        self.fixation_table.setRowCount(len(fixations))
+        for row, fixation in enumerate(fixations):
+            state = {"assigned": "Однозначно", "ambiguous": "Несколько рамок", "outside": "Вне объектов"}[fixation["assignment"]]
+            target = f"#{fixation['object_id']} {fixation['class_name']}" if fixation["object_id"] else "—"
+            if fixation["assignment"] == "ambiguous":
+                target = ", ".join(f"#{n}" for n in fixation["candidate_ids"])
+            for col, value in enumerate([str(fixation["id"]), f"{fixation['start']:.2f}", f"{fixation['duration']:.2f}", target, state]):
+                self.fixation_table.setItem(row, col, QTableWidgetItem(value))
+        self.canvas.update()
+
+    def select_fixation(self, row, column):
+        if self.analysis and row < len(self.analysis["fixations"]):
+            self.stop()
+            self.slider.setValue(round(self.analysis["fixations"][row]["end"] * 1000))
+
+    def start_analysis(self):
+        if self.worker is not None:
+            return
+        python = BASE / ".venv-detector/bin/python"
+        if not python.exists():
+            self.progress_label.setText("Сначала установите детектор: откройте «Настроить детектор.command».")
+            return
+        if not self.reader.database.exists():
+            self.progress_label.setText("Сначала соберите хотя бы один просмотр.")
+            return
+        self.stop()
+        self.worker_output = ""
+        self.analyze_button.setEnabled(False)
+        self.progress_label.setText("Запускается YOLO11m…")
+        self.worker = QProcess(self)
+        self.worker.setWorkingDirectory(str(BASE))
+        self.worker.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
+        self.worker.readyReadStandardOutput.connect(self.analysis_progress)
+        self.worker.finished.connect(self.analysis_finished)
+        self.worker.errorOccurred.connect(self.analysis_error)
+        self.worker.start(str(python), ["-u", str(BASE / "analyze_gaze.py"), "--database", str(self.reader.database)])
+
+    def analysis_progress(self):
+        if self.worker:
+            self.worker_output += bytes(self.worker.readAllStandardOutput()).decode("utf-8", errors="replace")
+            self.worker_output = self.worker_output[-8000:]
+            lines = [line for line in self.worker_output.splitlines() if line.strip()]
+            if lines:
+                self.progress_label.setText(lines[-1][-500:])
+
+    def analysis_finished(self, code, status):
+        self.analysis_progress()
+        worker, self.worker = self.worker, None
+        if worker:
+            worker.deleteLater()
+        self.analyze_button.setEnabled(True)
+        if code != 0:
+            self.progress_label.setText("Обработка завершилась с ошибкой. " + self.worker_output[-600:])
+        self.refresh()
+
+    def analysis_error(self, error):
+        if error == QProcess.ProcessError.FailedToStart:
+            self.progress_label.setText("Не удалось запустить окружение детектора. Откройте «Настроить детектор.command».")
+            self.worker.deleteLater()
+            self.worker = None
+            self.analyze_button.setEnabled(True)
 
     def seek(self, value):
         self.canvas.position = value / 1000
@@ -321,10 +463,17 @@ class ReviewPanel(QDialog):
                 self.notice.setText("Не удалось сохранить файл. Выберите другую папку.")
 
     def closeEvent(self, event):
+        if self.worker is not None:
+            self.progress_label.setText("Дождитесь завершения обработки YOLO, затем закройте панель.")
+            event.ignore()
+            return
         self.stop()
         event.accept()
 
     def reject(self):
+        if self.worker is not None:
+            self.progress_label.setText("Дождитесь завершения обработки YOLO.")
+            return
         self.stop()
         super().reject()
 
