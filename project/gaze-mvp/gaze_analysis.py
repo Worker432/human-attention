@@ -5,6 +5,8 @@ import math
 from pathlib import Path
 import sqlite3
 import tempfile
+from datetime import datetime, timezone
+import uuid
 
 ANALYSIS_VERSION = 1
 DEFAULT_FIXATIONS = dict(min_duration=.1, max_gap=.1, dispersion_fraction=.04, min_samples=3)
@@ -165,3 +167,111 @@ def load_analysis(database, trial, samples):
         return result
     except (OSError, ValueError, KeyError, TypeError):
         return None
+
+
+def annotation_path(database, image_sha):
+    if len(image_sha) != 64 or any(c not in "0123456789abcdef" for c in image_sha):
+        raise ValueError("Invalid image SHA-256")
+    return Path(database).parent / "annotations/images" / f"{image_sha}.json"
+
+
+def load_annotation(database, trial):
+    try:
+        record = json.loads(annotation_path(database, trial["image_sha256"]).read_text())
+        geometry = json.loads(trial["geometry"])
+        if (record["schema_version"] != 1 or record["image_sha256"] != trial["image_sha256"]
+                or record["width"] != geometry["image_width"] or record["height"] != geometry["image_height"]):
+            return None
+        validate_boxes(record["objects"], record["width"], record["height"])
+        return record
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def validate_boxes(boxes, width, height):
+    ids = set()
+    for box in boxes:
+        x1, y1, x2, y2 = box["xyxy"]
+        if not all(math.isfinite(v) for v in (x1, y1, x2, y2)) or not (0 <= x1 < x2 <= width and 0 <= y1 < y2 <= height):
+            raise ValueError("Рамка выходит за границы изображения или имеет нулевой размер")
+        if box["object_id"] in ids or not isinstance(box["object_id"], int) or box["object_id"] < 1:
+            raise ValueError("ID объектов должны быть уникальными положительными числами")
+        ids.add(box["object_id"])
+        if not isinstance(box["class_name"], str) or not box["class_name"].strip():
+            raise ValueError("У каждой рамки должен быть класс")
+
+
+def class_catalog(database):
+    root = Path(database).parent
+    result = {"person": 0, "car": 2, "bottle": 39}
+    for path in sorted((root / "analysis/trials").glob("*.json")):
+        try:
+            value = json.loads(path.read_text())
+            for box in value.get("objects", []):
+                result.setdefault(box["class_name"], box["class_id"])
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+    try:
+        result.update(json.loads((root / "annotations/classes.json").read_text()))
+    except FileNotFoundError:
+        pass
+    return result
+
+
+def save_annotation(database, trial, boxes, *, reviewed, note=""):
+    import copy
+    if not reviewed:
+        raise ValueError("Подтвердите, что проверили все выбранные типы объектов на изображении")
+    geometry = json.loads(trial["geometry"])
+    width, height = geometry["image_width"], geometry["image_height"]
+    boxes = copy.deepcopy(boxes)
+    validate_boxes(boxes, width, height)
+    catalog = class_catalog(database)
+    next_class = max(999, *catalog.values()) + 1
+    for box in boxes:
+        label = box["class_name"].strip().casefold()
+        if len(label) > 80:
+            raise ValueError("Название класса слишком длинное")
+        if label not in catalog:
+            catalog[label] = next_class
+            next_class += 1
+        box.update(class_name=label, class_id=catalog[label], confidence=None, source="manual")
+    record = dict(schema_version=1, image_sha256=trial["image_sha256"], width=width, height=height,
+                  revision=uuid.uuid4().hex, created_utc=datetime.now(timezone.utc).isoformat(),
+                  reviewed=True, note=note, objects=boxes)
+    path = annotation_path(database, trial["image_sha256"])
+    if path.exists():
+        old = json.loads(path.read_text())
+        revision = old.get("revision", uuid.uuid4().hex)
+        atomic_json(path.parent.parent / "history" / f"{trial['image_sha256']}-{revision}.json", old)
+    atomic_json(Path(database).parent / "annotations/classes.json", catalog)
+    atomic_json(path, record)
+    return record
+
+
+def manual_analysis(database, trial, samples):
+    record = load_annotation(database, trial)
+    if record is None or not record.get("reviewed"):
+        return None
+    automatic = load_analysis(database, trial, samples)
+    parameters = automatic.get("fixation_parameters", DEFAULT_FIXATIONS) if automatic else DEFAULT_FIXATIONS
+    fixes = associate(extract_fixations(samples, record["width"], record["height"], **parameters), record["objects"])
+    transitions, stats = summarize(fixes, record["objects"])
+    return dict(analysis_version=ANALYSIS_VERSION, annotation_source="manual", annotation_revision=record["revision"],
+                trial_id=trial["id"], image_id=trial["image_id"], image_path=trial["path"],
+                image_sha256=trial["image_sha256"], source_digest=source_digest(trial, samples),
+                trial_status=trial["status"], fixation_parameters=parameters,
+                objects=record["objects"], fixations=fixes, transitions=transitions, object_stats=stats,
+                comparison=dict(automatic_assigned=sum(f["assignment"] == "assigned" for f in automatic["fixations"]) if automatic else None,
+                                automatic_transitions=len(automatic["transitions"]) if automatic else None))
+
+
+def effective_analysis(database, trial, samples, prefer_manual=True):
+    if prefer_manual:
+        manual = manual_analysis(database, trial, samples)
+        if manual is not None:
+            return manual
+    result = load_analysis(database, trial, samples)
+    if result:
+        result = dict(result, annotation_source="yolo")
+    return result

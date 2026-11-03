@@ -42,9 +42,16 @@ class Collector(QWidget):
         self.onset = None
         self.block_count = 0
         self.closed = False
+        self.validation_active = False
         self.review_button = QPushButton("Просмотреть записи (R)", self)
         self.review_button.setStyleSheet("padding:10px; background:#364456; color:white; border-radius:6px;")
         self.review_button.clicked.connect(self.open_review)
+        self.validation_button = QPushButton("Проверить точность (V)", self)
+        self.validation_button.setStyleSheet("padding:10px; background:#364456; color:white; border-radius:6px;")
+        self.validation_button.clicked.connect(self.open_validation)
+        self.prediction_button = QPushButton("Прогноз модели (P)", self)
+        self.prediction_button.setStyleSheet("padding:10px; background:#364456; color:white; border-radius:6px;")
+        self.prediction_button.clicked.connect(self.open_prediction)
         self.store.begin_run(dict(screen_name=screen.name(), viewport=self.viewport,
                                   device_pixel_ratio=screen.devicePixelRatio(),
                                   minimum_confidence="MEDIUM", smoothing="none",
@@ -122,6 +129,8 @@ class Collector(QWidget):
         self.update()
 
     def record_packets(self, now):
+        if self.validation_active:
+            return  # The modal validation window is the sole queue consumer.
         rows = []
         for sequence, point, confidence, status, stamp, mono, sdk_stamp in self.source.drain():
             valid = (point is not None and confidence in {"MEDIUM", "HIGH"}
@@ -172,6 +181,10 @@ class Collector(QWidget):
             self.close()
         elif event.key() == Qt.Key.Key_R:
             self.open_review()
+        elif event.key() == Qt.Key.Key_V:
+            self.open_validation()
+        elif event.key() == Qt.Key.Key_P:
+            self.open_prediction()
         elif event.key() == Qt.Key.Key_Space:
             if self.mode in {"viewing", "interval", "pending"}:
                 self.record_packets(time.monotonic())
@@ -192,6 +205,34 @@ class Collector(QWidget):
         panel.exec()
         panel.deleteLater()
 
+    def open_validation(self):
+        from validate_gaze import ValidationDialog
+        if self.mode == "display_changed":
+            return
+        if self.mode in {"viewing", "interval", "pending"}:
+            self.record_packets(time.monotonic())
+            self.pause("Проверка точности. Space — продолжить сбор после проверки.")
+        self.validation_active = True
+        panel = ValidationDialog(self.source, self.screen_ref, self.store.folder / "validation", self)
+        try:
+            panel.showFullScreen()
+            panel.exec()
+        finally:
+            self.validation_active = False
+            self.last_good = -math.inf
+            self.preview = None
+            panel.deleteLater()
+
+    def open_prediction(self):
+        from predict_app import PredictionPanel
+        if self.mode in {"viewing", "interval", "pending"}:
+            self.record_packets(time.monotonic())
+            self.pause("Просмотр прогноза модели. Space — продолжить сбор.")
+        image = self.store.root / self.entry["path"] if hasattr(self, "entry") else None
+        panel = PredictionPanel(image, self)
+        panel.exec()
+        panel.deleteLater()
+
     def event(self, event):
         if (event.type() == QEvent.Type.WindowDeactivate and hasattr(self, "mode")
                 and self.mode in {"viewing", "interval", "pending"}):
@@ -202,6 +243,10 @@ class Collector(QWidget):
     def paintEvent(self, event):
         self.review_button.setGeometry(max(10, self.width() - 240), 14, 225, 38)
         self.review_button.setVisible(self.mode not in {"viewing", "interval", "pending"})
+        self.validation_button.setGeometry(max(10, self.width() - 480), 14, 225, 38)
+        self.validation_button.setVisible(self.mode not in {"viewing", "interval", "pending"})
+        self.prediction_button.setGeometry(max(10, self.width() - 720), 14, 225, 38)
+        self.prediction_button.setVisible(self.mode not in {"viewing", "interval", "pending"})
         painter = QPainter(self)
         painter.fillRect(self.rect(), QColor("#17191d"))
         if self.mode in {"pending", "viewing"}:

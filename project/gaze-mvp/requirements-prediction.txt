@@ -1,0 +1,7 @@
+-r requirements-detector.txt
+# Install with --no-build-isolation after setuptools==80.9.0 and wheel.
+setuptools==80.9.0
+boltons==26.2.0
+einops==0.8.2
+deepgaze-pytorch @ git+https://github.com/matthias-k/DeepGaze.git@c7db17e2d1d7ea6468ffdee2cfaddf141095dcff
+clip @ git+https://github.com/openai/CLIP.git@dcba3cb2e2827b402d2701e7e1c7d9fed8a20ef1

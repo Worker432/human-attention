@@ -174,6 +174,9 @@ class ReviewPanel(QDialog):
         title = QLabel("Сохранённые просмотры")
         top.addWidget(title)
         top.addStretch()
+        prediction_button = QPushButton("Прогноз модели…")
+        prediction_button.clicked.connect(self.open_prediction)
+        top.addWidget(prediction_button)
         self.analyze_button = QPushButton("Обработать новые · YOLO")
         self.analyze_button.clicked.connect(self.start_analysis)
         top.addWidget(self.analyze_button)
@@ -339,6 +342,20 @@ class ReviewPanel(QDialog):
     def toggle_boxes(self, enabled):
         self.canvas.show_boxes = enabled
         self.canvas.update()
+
+    def open_prediction(self):
+        from predict_app import PredictionPanel
+        if self.worker is not None:
+            self.progress_label.setText("Дождитесь завершения обработки YOLO.")
+            return
+        self.stop()
+        image = None
+        if self.trial:
+            _, _, protocol = self.reader.load(self.trial["id"])
+            image = Path(protocol["image_root"]) / self.trial["path"]
+        panel = PredictionPanel(image, self)
+        panel.exec()
+        panel.deleteLater()
 
     def show_analysis(self, result):
         self.analysis = self.canvas.analysis = result
