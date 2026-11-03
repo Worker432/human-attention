@@ -52,3 +52,14 @@ collected/
 /docs/check_docx/
 *.zip
 ~$*.docx
+
+# Local manuscripts and formal documents
+/статья/
+*.doc
+*.docx
+*.odt
+*.rtf
+*.pdf
+*.ppt
+*.pptx
+*.odp
