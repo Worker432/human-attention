@@ -1,0 +1,136 @@
+{
+  "data_source": "model_prediction",
+  "metric": "share_of_sampled_points",
+  "image_sha256": "25c60a35b0c78ebf5a7e1a446635a28e31850f72db86bd6cf03037203bb1e436",
+  "variants": 30,
+  "seeds": [
+    42,
+    43,
+    44,
+    45,
+    46,
+    47,
+    48,
+    49,
+    50,
+    51,
+    52,
+    53,
+    54,
+    55,
+    56,
+    57,
+    58,
+    59,
+    60,
+    61,
+    62,
+    63,
+    64,
+    65,
+    66,
+    67,
+    68,
+    69,
+    70,
+    71
+  ],
+  "total_points": 240,
+  "rows": [
+    {
+      "assignment": "assigned",
+      "object_id": 2,
+      "class_name": "person",
+      "xyxy": [
+        83.23632049560547,
+        67.26519775390625,
+        165.47174072265625,
+        316.3693542480469
+      ],
+      "count": 45,
+      "share": 0.1875
+    },
+    {
+      "assignment": "assigned",
+      "object_id": 4,
+      "class_name": "person",
+      "xyxy": [
+        213.460205078125,
+        84.91626739501953,
+        317.4167175292969,
+        317.8632507324219
+      ],
+      "count": 34,
+      "share": 0.14166666666666666
+    },
+    {
+      "assignment": "assigned",
+      "object_id": 3,
+      "class_name": "person",
+      "xyxy": [
+        164.26161193847656,
+        86.50299072265625,
+        233.91943359375,
+        312.2508544921875
+      ],
+      "count": 28,
+      "share": 0.11666666666666667
+    },
+    {
+      "assignment": "assigned",
+      "object_id": 1,
+      "class_name": "person",
+      "xyxy": [
+        16.59375,
+        77.34265899658203,
+        103.8969955444336,
+        323.8492431640625
+      ],
+      "count": 11,
+      "share": 0.04583333333333333
+    },
+    {
+      "assignment": "assigned",
+      "object_id": 5,
+      "class_name": "bottle",
+      "xyxy": [
+        135.8885498046875,
+        105.77820587158203,
+        148.87026977539062,
+        137.75729370117188
+      ],
+      "count": 0,
+      "share": 0.0
+    },
+    {
+      "assignment": "assigned",
+      "object_id": 6,
+      "class_name": "bottle",
+      "xyxy": [
+        265.7543029785156,
+        143.35324096679688,
+        275.4190673828125,
+        168.69935607910156
+      ],
+      "count": 0,
+      "share": 0.0
+    },
+    {
+      "assignment": "ambiguous",
+      "object_id": null,
+      "class_name": null,
+      "xyxy": null,
+      "count": 18,
+      "share": 0.075
+    },
+    {
+      "assignment": "outside",
+      "object_id": null,
+      "class_name": null,
+      "xyxy": null,
+      "count": 104,
+      "share": 0.43333333333333335
+    }
+  ],
+  "note": "Shares of predicted points, not fixation duration or percentage of people. All points are reassigned to the first variant's detection boxes; overlaps and outside points are separate exclusive categories."
+}
