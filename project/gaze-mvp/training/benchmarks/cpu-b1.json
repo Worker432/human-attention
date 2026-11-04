@@ -1,0 +1,37 @@
+{
+  "scope": "full HAT Mac port synthetic forward/backward/AdamW; not real-data training",
+  "upstream_commit": "557205d3136a63120041c700ee717196a429e89b",
+  "device": "cpu",
+  "platform": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+  "torch": "2.14.1",
+  "resolution": [
+    512,
+    320
+  ],
+  "batch": 1,
+  "history": 6,
+  "threads": 4,
+  "weights": "random; no DeepGaze",
+  "frozen_backbone": true,
+  "train_pixel_decoder": true,
+  "warmup": 1,
+  "step_seconds": [
+    0.3300340409987257,
+    0.3287578749950626,
+    0.32683233299758285,
+    0.32177537500683684,
+    0.32105433299875585
+  ],
+  "median_seconds": 0.32683233299758285,
+  "losses": [
+    5.624834060668945,
+    3.2859530448913574,
+    1.2107263803482056,
+    0.36990034580230713,
+    0.06964261829853058
+  ],
+  "parameters": 44819689,
+  "trainable_parameters": 19315777,
+  "process_peak_rss_bytes": 1592164352,
+  "mps_max_observed_driver_bytes": null
+}
